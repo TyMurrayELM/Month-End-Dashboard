@@ -4,12 +4,13 @@ import supabase from '../supabaseClient';
 
 const Dashboard = () => {
   const [categories, setCategories] = useState([]);
-  const [isNewTaskRecurring, setIsNewTaskRecurring] = useState(true);
+  const [isNewTaskRecurring, setIsNewTaskRecurring] = useState({});
   const [showCompleted, setShowCompleted] = useState(true);
   const [currentMonthId, setCurrentMonthId] = useState(null);
   const [monthOptions, setMonthOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newTaskNames, setNewTaskNames] = useState({});
+  const [addTaskExpanded, setAddTaskExpanded] = useState({});
   const [deadlineStatus, setDeadlineStatus] = useState({
     deadlineDate: null,
     isPastDeadline: false,
@@ -599,10 +600,27 @@ const Dashboard = () => {
     ));
   };
   
+  // Toggle add task form visibility
+  const toggleAddTaskForm = (categoryId) => {
+    setAddTaskExpanded(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+    
+    // Initialize recurring to true when expanding
+    if (!addTaskExpanded[categoryId]) {
+      setIsNewTaskRecurring(prev => ({
+        ...prev,
+        [categoryId]: true
+      }));
+    }
+  };
+  
   // Add a new task
   const addNewTask = async (categoryId) => {
     try {
       const name = (newTaskNames[categoryId] || "New Task").trim() || "New Task";
+      const recurring = isNewTaskRecurring[categoryId] !== false; // Default to true if not set
       
       // Create task template first
       const { data: template, error: templateError } = await supabase
@@ -610,7 +628,7 @@ const Dashboard = () => {
         .insert([{ 
           name: name, 
           category_id: categoryId,
-          recurring: isNewTaskRecurring,
+          recurring: recurring,
           has_subtasks: false
         }])
         .select();
@@ -642,7 +660,7 @@ const Dashboard = () => {
                   name: name, 
                   completed: false, 
                   completionDate: null,
-                  recurring: isNewTaskRecurring,
+                  recurring: recurring,
                   templateId: template[0].id
                 }
               ]
@@ -650,20 +668,16 @@ const Dashboard = () => {
           : category
       ));
       
-      // Reset just this category's task name
-      setNewTaskNames(prev => ({
-        ...prev,
-        [categoryId]: "New Task"
-      }));
-      
-      setIsNewTaskRecurring(true);
+      // Reset states
+      setNewTaskNames(prev => ({...prev, [categoryId]: "New Task"}));
+      setAddTaskExpanded(prev => ({...prev, [categoryId]: false}));
       
     } catch (error) {
       console.error("Error adding new task:", error);
     }
   };
   
-  // Delete a task
+  // Delete a task with confirmation
   const deleteTask = async (categoryId, taskId) => {
     try {
       // Find the task
@@ -674,6 +688,11 @@ const Dashboard = () => {
       if (taskIndex === -1) return;
       
       const task = categories[categoryIndex].tasks[taskIndex];
+      
+      // Confirm deletion
+      if (!window.confirm(`Are you sure you want to delete task "${task.name}"? This cannot be undone.`)) {
+        return; // User cancelled
+      }
       
       // Delete task instance
       const { error: instanceError } = await supabase
@@ -837,7 +856,7 @@ const Dashboard = () => {
     }
   };
   
-  // Delete a subtask
+  // Delete a subtask with confirmation
   const deleteSubtask = async (categoryId, taskId, subtaskId) => {
     try {
       // Find the subtask
@@ -854,6 +873,11 @@ const Dashboard = () => {
       if (subtaskIndex === -1) return;
       
       const subtask = task.subtasks[subtaskIndex];
+      
+      // Confirm deletion
+      if (!window.confirm(`Are you sure you want to delete subtask "${subtask.name}"? This cannot be undone.`)) {
+        return; // User cancelled
+      }
       
       // Delete subtask instance
       const { error: instanceError } = await supabase
@@ -1249,42 +1273,58 @@ const Dashboard = () => {
                     ))}
                   </ul>
                   
-                  {/* Add task section with input field */}
+                  {/* Add task section with expanded form */}
                   <div className="mt-3">
-                    <div className="flex items-center mb-2">
-                      <input
-                        type="text"
-                        placeholder="Task name"
-                        className="mr-2 px-2 py-1 border border-gray-300 rounded text-sm"
-                        value={newTaskNames[category.id] || "New Task"}
-                        onChange={(e) => setNewTaskNames(prev => ({
-                          ...prev,
-                          [category.id]: e.target.value
-                        }))}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && (newTaskNames[category.id] || "").trim()) {
-                            addNewTask(category.id);
-                          }
-                        }}
-                      />
+                    {addTaskExpanded[category.id] ? (
+                      <div>
+                        <div className="flex items-center mb-2">
+                          <input
+                            type="text"
+                            placeholder="Task name"
+                            className="mr-2 px-2 py-1 border border-gray-300 rounded text-sm"
+                            value={newTaskNames[category.id] || "New Task"}
+                            onChange={(e) => setNewTaskNames(prev => ({
+                              ...prev,
+                              [category.id]: e.target.value
+                            }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (newTaskNames[category.id] || "").trim()) {
+                                addNewTask(category.id);
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <button 
+                            onClick={() => addNewTask(category.id)}
+                            className="px-2 py-1 bg-blue-500 text-white rounded text-sm"
+                          >
+                            Add
+                          </button>
+                        </div>
+                        <div className="flex items-center">
+                          <label className="inline-flex items-center mr-3">
+                            <input
+                              type="checkbox"
+                              className="form-checkbox h-4 w-4 text-blue-500"
+                              checked={isNewTaskRecurring[category.id] !== false}
+                              onChange={() => setIsNewTaskRecurring(prev => ({
+                                ...prev,
+                                [category.id]: !(prev[category.id] !== false)
+                              }))}
+                            />
+                            <span className="ml-2 text-sm text-gray-600">Make recurring</span>
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
                       <button 
-                        onClick={() => addNewTask(category.id)}
-                        className="px-2 py-1 bg-blue-500 text-white rounded text-sm"
+                        onClick={() => toggleAddTaskForm(category.id)}
+                        className="flex items-center text-sm text-blue-500 hover:text-blue-600 focus:outline-none"
                       >
+                        <Plus size={16} className="mr-1" />
                         Add Task
                       </button>
-                    </div>
-                    <div className="flex items-center">
-                      <label className="inline-flex items-center mr-3">
-                        <input
-                          type="checkbox"
-                          className="form-checkbox h-4 w-4 text-blue-500"
-                          checked={isNewTaskRecurring}
-                          onChange={() => setIsNewTaskRecurring(!isNewTaskRecurring)}
-                        />
-                        <span className="ml-2 text-sm text-gray-600">Make recurring</span>
-                      </label>
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1296,4 +1336,4 @@ const Dashboard = () => {
   );
 };
 
-export default Dashboard;
+export default Dashboard
