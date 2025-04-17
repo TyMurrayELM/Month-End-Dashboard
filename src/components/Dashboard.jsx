@@ -9,6 +9,7 @@ const Dashboard = () => {
   const [currentMonthId, setCurrentMonthId] = useState(null);
   const [monthOptions, setMonthOptions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [newTaskNames, setNewTaskNames] = useState({});
   const [deadlineStatus, setDeadlineStatus] = useState({
     deadlineDate: null,
     isPastDeadline: false,
@@ -56,23 +57,23 @@ const Dashboard = () => {
           // Use existing months
           setMonthOptions(months.map(m => ({ id: m.id, name: m.month_name })));
           
-// Sort months chronologically (oldest to newest)
-const sortedMonths = [...months].sort((a, b) => {
-  const [monthA, yearA] = a.month_name.split(' ');
-  const [monthB, yearB] = b.month_name.split(' ');
-  const monthOrder = {
-    "January": 0, "February": 1, "March": 2, "April": 3, 
-    "May": 4, "June": 5, "July": 6, "August": 7,
-    "September": 8, "October": 9, "November": 10, "December": 11
-  };
-  
-  // First compare year
-  if (parseInt(yearA) !== parseInt(yearB)) {
-    return parseInt(yearA) - parseInt(yearB);
-  }
-  // If same year, compare month
-  return monthOrder[monthA] - monthOrder[monthB];
-});
+          // Sort months chronologically (oldest to newest)
+          const sortedMonths = [...months].sort((a, b) => {
+            const [monthA, yearA] = a.month_name.split(' ');
+            const [monthB, yearB] = b.month_name.split(' ');
+            const monthOrder = {
+              "January": 0, "February": 1, "March": 2, "April": 3, 
+              "May": 4, "June": 5, "July": 6, "August": 7,
+              "September": 8, "October": 9, "November": 10, "December": 11
+            };
+            
+            // First compare year
+            if (parseInt(yearA) !== parseInt(yearB)) {
+              return parseInt(yearA) - parseInt(yearB);
+            }
+            // If same year, compare month
+            return monthOrder[monthA] - monthOrder[monthB];
+          });
 
           // Find first incomplete month
           const findIncompleteMonth = async () => {
@@ -601,11 +602,13 @@ const sortedMonths = [...months].sort((a, b) => {
   // Add a new task
   const addNewTask = async (categoryId) => {
     try {
+      const name = (newTaskNames[categoryId] || "New Task").trim() || "New Task";
+      
       // Create task template first
       const { data: template, error: templateError } = await supabase
         .from('task_templates')
         .insert([{ 
-          name: "New Task", 
+          name: name, 
           category_id: categoryId,
           recurring: isNewTaskRecurring,
           has_subtasks: false
@@ -636,7 +639,7 @@ const sortedMonths = [...months].sort((a, b) => {
                 ...category.tasks,
                 { 
                   id: instance[0].id,
-                  name: "New Task", 
+                  name: name, 
                   completed: false, 
                   completionDate: null,
                   recurring: isNewTaskRecurring,
@@ -647,7 +650,12 @@ const sortedMonths = [...months].sort((a, b) => {
           : category
       ));
       
-      // Reset recurring checkbox to default (true)
+      // Reset just this category's task name
+      setNewTaskNames(prev => ({
+        ...prev,
+        [categoryId]: "New Task"
+      }));
+      
       setIsNewTaskRecurring(true);
       
     } catch (error) {
@@ -1241,8 +1249,31 @@ const sortedMonths = [...months].sort((a, b) => {
                     ))}
                   </ul>
                   
-                  {/* Add task section with recurring checkbox */}
+                  {/* Add task section with input field */}
                   <div className="mt-3">
+                    <div className="flex items-center mb-2">
+                      <input
+                        type="text"
+                        placeholder="Task name"
+                        className="mr-2 px-2 py-1 border border-gray-300 rounded text-sm"
+                        value={newTaskNames[category.id] || "New Task"}
+                        onChange={(e) => setNewTaskNames(prev => ({
+                          ...prev,
+                          [category.id]: e.target.value
+                        }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && (newTaskNames[category.id] || "").trim()) {
+                            addNewTask(category.id);
+                          }
+                        }}
+                      />
+                      <button 
+                        onClick={() => addNewTask(category.id)}
+                        className="px-2 py-1 bg-blue-500 text-white rounded text-sm"
+                      >
+                        Add Task
+                      </button>
+                    </div>
                     <div className="flex items-center">
                       <label className="inline-flex items-center mr-3">
                         <input
@@ -1253,13 +1284,6 @@ const sortedMonths = [...months].sort((a, b) => {
                         />
                         <span className="ml-2 text-sm text-gray-600">Make recurring</span>
                       </label>
-                      <button 
-                        onClick={() => addNewTask(category.id)}
-                        className="flex items-center text-sm text-blue-500 hover:text-blue-600 focus:outline-none"
-                      >
-                        <Plus size={16} className="mr-1" />
-                        Add task
-                      </button>
                     </div>
                   </div>
                 </div>
