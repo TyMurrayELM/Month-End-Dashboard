@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat } from 'lucide-react';
+import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit } from 'lucide-react';
 import supabase from '../supabaseClient';
 
 const Dashboard = () => {
@@ -16,6 +16,36 @@ const Dashboard = () => {
     isPastDeadline: false,
     isComplete: false
   });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editingTaskName, setEditingTaskName] = useState('');
+  const [deleteType, setDeleteType] = useState({ show: false, taskId: null, categoryId: null, type: 'single' });
+
+  // Format date nicely
+  const formatDate = (dateString) => {
+    if (!dateString) return "Open";
+    
+    const date = new Date(dateString);
+    
+    // Return format like "April 17th at 5:04pm"
+    const month = date.toLocaleString('en-US', { month: 'long' });
+    const day = date.getDate();
+    const suffix = getDaySuffix(day);
+    const time = date.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    
+    return `${month} ${day}${suffix} at ${time}`;
+  };
+  
+  // Helper for day suffix
+  const getDaySuffix = (day) => {
+    if (day > 3 && day < 21) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
 
   // Load months and categories when component mounts
   useEffect(() => {
@@ -143,6 +173,11 @@ const Dashboard = () => {
     loadInitialData();
   }, []);
   
+  // Function to sort tasks alphabetically
+  const sortTasksAlphabetically = (tasks) => {
+    return [...tasks].sort((a, b) => a.name.localeCompare(b.name));
+  };
+  
   // Load tasks when month changes
   useEffect(() => {
     const loadTasksForMonth = async () => {
@@ -235,6 +270,11 @@ const Dashboard = () => {
           
           categoriesWithTasks[categoryIndex].tasks.push(task);
         }
+        
+        // Sort tasks alphabetically in each category
+        categoriesWithTasks.forEach(category => {
+          category.tasks = sortTasksAlphabetically(category.tasks);
+        });
         
         // Check if all tasks are complete
         const allTasksComplete = categoriesWithTasks.every(category => 
@@ -491,7 +531,138 @@ const Dashboard = () => {
     };
   };
   
-  // Toggle task expansion (for subtasks)
+  // Task editing functions
+  const startEditingTask = (taskId, taskName) => {
+    setEditingTaskId(taskId);
+    setEditingTaskName(taskName);
+  };
+
+  const saveTaskName = async (categoryId, taskId) => {
+    try {
+      if (!editingTaskName.trim()) {
+        setEditingTaskId(null);
+        return;
+      }
+      
+      // Find the task
+      const categoryIndex = categories.findIndex(c => c.id === categoryId);
+      if (categoryIndex === -1) return;
+      
+      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
+      if (taskIndex === -1) return;
+      
+      const task = categories[categoryIndex].tasks[taskIndex];
+      if (!task.templateId) return;
+      
+      // Update template in database
+      const { error } = await supabase
+        .from('task_templates')
+        .update({ name: editingTaskName.trim() })
+        .eq('id', task.templateId);
+        
+      if (error) throw error;
+      
+      // Update local state
+      const newCategories = [...categories];
+      newCategories[categoryIndex].tasks[taskIndex] = {
+        ...task,
+        name: editingTaskName.trim()
+      };
+      
+      // Resort tasks alphabetically
+      newCategories[categoryIndex].tasks = sortTasksAlphabetically(newCategories[categoryIndex].tasks);
+      
+      setCategories(newCategories);
+      setEditingTaskId(null);
+      
+    } catch (error) {
+      console.error("Error updating task name:", error);
+    }
+  };
+
+  // Enhanced delete task functions
+  const showDeleteOptions = (categoryId, taskId) => {
+    setDeleteType({
+      show: true,
+      taskId,
+      categoryId,
+      type: 'single'
+    });
+  };
+
+  const handleDeleteTask = async (type) => {
+    try {
+      const { categoryId, taskId } = deleteType;
+      
+      // Find the task
+      const categoryIndex = categories.findIndex(c => c.id === categoryId);
+      if (categoryIndex === -1) return;
+      
+      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
+      if (taskIndex === -1) return;
+      
+      const task = categories[categoryIndex].tasks[taskIndex];
+      
+      if (type === 'current') {
+        // Delete only the task instance
+        const { error: instanceError } = await supabase
+          .from('task_instances')
+          .delete()
+          .eq('id', taskId);
+          
+        if (instanceError) throw instanceError;
+      } 
+      else if (type === 'future') {
+        // Delete current instance
+        const { error: instanceError } = await supabase
+          .from('task_instances')
+          .delete()
+          .eq('id', taskId);
+          
+        if (instanceError) throw instanceError;
+        
+        // Set task template to non-recurring to prevent future instances
+        const { error: templateError } = await supabase
+          .from('task_templates')
+          .update({ recurring: false })
+          .eq('id', task.templateId);
+          
+        if (templateError) throw templateError;
+      }
+      else if (type === 'all') {
+        // Delete task instance
+        const { error: instanceError } = await supabase
+          .from('task_instances')
+          .delete()
+          .eq('id', taskId);
+          
+        if (instanceError) throw instanceError;
+        
+        // Delete task template
+        if (task.templateId) {
+          const { error: templateError } = await supabase
+            .from('task_templates')
+            .delete()
+            .eq('id', task.templateId);
+            
+          if (templateError) throw templateError;
+        }
+      }
+      
+      // Update state
+      const newCategories = [...categories];
+      newCategories[categoryIndex].tasks = newCategories[categoryIndex].tasks.filter(t => t.id !== taskId);
+      setCategories(newCategories);
+      
+      // Reset delete dialog
+      setDeleteType({ show: false, taskId: null, categoryId: null, type: 'single' });
+      
+    } catch (error) {
+      console.error("Error deleting task:", error);
+    }
+  };
+  
+  // Toggle category expansion
   const toggleExpand = (categoryId) => {
     setCategories(categories.map(category => 
       category.id === categoryId 
@@ -529,7 +700,7 @@ const Dashboard = () => {
       newCategories[categoryIndex].tasks[taskIndex] = {
         ...task,
         completed: newCompletionStatus,
-        completionDate: newCompletionStatus ? new Date().toLocaleDateString() : null
+        completionDate: newCompletionStatus ? new Date().toISOString() : null
       };
       
       setCategories(newCategories);
@@ -574,7 +745,7 @@ const Dashboard = () => {
       newCategories[categoryIndex].tasks[taskIndex].subtasks[subtaskIndex] = {
         ...subtask,
         completed: newCompletionStatus,
-        completionDate: newCompletionStatus ? new Date().toLocaleDateString() : null
+        completionDate: newCompletionStatus ? new Date().toISOString() : null
       };
       
       setCategories(newCategories);
@@ -653,7 +824,7 @@ const Dashboard = () => {
         category.id === categoryId 
           ? {
               ...category,
-              tasks: [
+              tasks: sortTasksAlphabetically([
                 ...category.tasks,
                 { 
                   id: instance[0].id,
@@ -663,7 +834,7 @@ const Dashboard = () => {
                   recurring: recurring,
                   templateId: template[0].id
                 }
-              ]
+              ])
             }
           : category
       ));
@@ -674,123 +845,6 @@ const Dashboard = () => {
       
     } catch (error) {
       console.error("Error adding new task:", error);
-    }
-  };
-  
-  // Delete a task with confirmation
-  const deleteTask = async (categoryId, taskId) => {
-    try {
-      // Find the task
-      const categoryIndex = categories.findIndex(c => c.id === categoryId);
-      if (categoryIndex === -1) return;
-      
-      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
-      if (taskIndex === -1) return;
-      
-      const task = categories[categoryIndex].tasks[taskIndex];
-      
-      // Confirm deletion
-      if (!window.confirm(`Are you sure you want to delete task "${task.name}"? This cannot be undone.`)) {
-        return; // User cancelled
-      }
-      
-      // Delete task instance
-      const { error: instanceError } = await supabase
-        .from('task_instances')
-        .delete()
-        .eq('id', taskId);
-        
-      if (instanceError) throw instanceError;
-      
-      // Delete task template
-      if (task.templateId) {
-        const { error: templateError } = await supabase
-          .from('task_templates')
-          .delete()
-          .eq('id', task.templateId);
-          
-        if (templateError) throw templateError;
-      }
-      
-      // Update state
-      const newCategories = [...categories];
-      newCategories[categoryIndex].tasks = newCategories[categoryIndex].tasks.filter(t => t.id !== taskId);
-      setCategories(newCategories);
-      
-    } catch (error) {
-      console.error("Error deleting task:", error);
-    }
-  };
-  
-  // Toggle task recurring status
-  const toggleRecurringStatus = async (categoryId, taskId) => {
-    try {
-      // Find the task
-      const categoryIndex = categories.findIndex(c => c.id === categoryId);
-      if (categoryIndex === -1) return;
-      
-      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
-      if (taskIndex === -1) return;
-      
-      const task = categories[categoryIndex].tasks[taskIndex];
-      if (!task.templateId) return;
-      
-      const newRecurringStatus = !task.recurring;
-      
-      // Update template in database
-      const { error } = await supabase
-        .from('task_templates')
-        .update({ recurring: newRecurringStatus })
-        .eq('id', task.templateId);
-        
-      if (error) throw error;
-      
-      // Update local state
-      const newCategories = [...categories];
-      newCategories[categoryIndex].tasks[taskIndex] = {
-        ...task,
-        recurring: newRecurringStatus
-      };
-      
-      setCategories(newCategories);
-      
-    } catch (error) {
-      console.error("Error updating recurring status:", error);
-    }
-  };
-  
-  // Update subtask amount
-  const updateSubtaskAmount = async (categoryId, taskId, subtaskId, amount) => {
-    try {
-      // Find the subtask
-      const categoryIndex = categories.findIndex(c => c.id === categoryId);
-      if (categoryIndex === -1) return;
-      
-      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
-      if (taskIndex === -1) return;
-      
-      const task = categories[categoryIndex].tasks[taskIndex];
-      if (!task.subtasks) return;
-      
-      const subtaskIndex = task.subtasks.findIndex(s => s.id === subtaskId);
-      if (subtaskIndex === -1) return;
-      
-      // Update in database
-      const { error } = await supabase
-        .from('subtask_instances')
-        .update({ amount })
-        .eq('id', subtaskId);
-        
-      if (error) throw error;
-      
-      // Update local state
-      const newCategories = [...categories];
-      newCategories[categoryIndex].tasks[taskIndex].subtasks[subtaskIndex].amount = amount;
-      
-      setCategories(newCategories);
-      
-    } catch (error) {
-      console.error("Error updating subtask amount:", error);
     }
   };
   
@@ -909,6 +963,78 @@ const Dashboard = () => {
     }
   };
   
+  // Toggle task recurring status
+  const toggleRecurringStatus = async (categoryId, taskId) => {
+    try {
+      // Find the task
+      const categoryIndex = categories.findIndex(c => c.id === categoryId);
+      if (categoryIndex === -1) return;
+      
+      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
+      if (taskIndex === -1) return;
+      
+      const task = categories[categoryIndex].tasks[taskIndex];
+      if (!task.templateId) return;
+      
+      const newRecurringStatus = !task.recurring;
+      
+      // Update template in database
+      const { error } = await supabase
+        .from('task_templates')
+        .update({ recurring: newRecurringStatus })
+        .eq('id', task.templateId);
+        
+      if (error) throw error;
+      
+      // Update local state
+      const newCategories = [...categories];
+      newCategories[categoryIndex].tasks[taskIndex] = {
+        ...task,
+        recurring: newRecurringStatus
+      };
+      
+      setCategories(newCategories);
+      
+    } catch (error) {
+      console.error("Error updating recurring status:", error);
+    }
+  };
+  
+  // Update subtask amount
+  const updateSubtaskAmount = async (categoryId, taskId, subtaskId, amount) => {
+    try {
+      // Find the subtask
+      const categoryIndex = categories.findIndex(c => c.id === categoryId);
+      if (categoryIndex === -1) return;
+      
+      const taskIndex = categories[categoryIndex].tasks.findIndex(t => t.id === taskId);
+      if (taskIndex === -1) return;
+      
+      const task = categories[categoryIndex].tasks[taskIndex];
+      if (!task.subtasks) return;
+      
+      const subtaskIndex = task.subtasks.findIndex(s => s.id === subtaskId);
+      if (subtaskIndex === -1) return;
+      
+      // Update in database
+      const { error } = await supabase
+        .from('subtask_instances')
+        .update({ amount })
+        .eq('id', subtaskId);
+        
+      if (error) throw error;
+      
+      // Update local state
+      const newCategories = [...categories];
+      newCategories[categoryIndex].tasks[taskIndex].subtasks[subtaskIndex].amount = amount;
+      
+      setCategories(newCategories);
+      
+    } catch (error) {
+      console.error("Error updating subtask amount:", error);
+    }
+  };
+  
   // Get completion status for category tasks
   const getCompletionStatus = (tasks) => {
     let total = tasks.length;
@@ -947,6 +1073,18 @@ const Dashboard = () => {
     
     const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
     return { completed: completedTasks, total: totalTasks, percentage };
+  };
+  
+  // Filter tasks based on search term
+  const getFilteredTasks = (tasks) => {
+    if (!searchTerm.trim()) return tasks;
+    
+    return tasks.filter(task => 
+      task.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (task.hasSubtasks && task.subtasks?.some(
+        subtask => subtask.name.toLowerCase().includes(searchTerm.toLowerCase())
+      ))
+    );
   };
   
   if (loading) {
@@ -993,6 +1131,24 @@ const Dashboard = () => {
             <Filter size={16} />
             <span>{showCompleted ? "Hide Completed" : "Show Completed"}</span>
           </button>
+        </div>
+      </div>
+      
+      {/* Search Bar */}
+      <div className="mb-6">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Search tasks..."
+            className="w-full md:w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <div className="absolute left-3 top-2.5 text-gray-400">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
         </div>
       </div>
       
@@ -1119,7 +1275,7 @@ const Dashboard = () => {
               {category.expanded && (
                 <div className="p-4">
                   <ul className="divide-y divide-gray-200">
-                    {filteredTasks.map(task => (
+                    {getFilteredTasks(filteredTasks).map(task => (
                       <li key={task.id} className="py-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3">
@@ -1135,9 +1291,36 @@ const Dashboard = () => {
                             </button>
                             <div className="flex flex-col">
                               <div className="flex items-center">
-                                <span className={`${task.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
-                                  {task.name}
-                                </span>
+                                {editingTaskId === task.id ? (
+                                  <input
+                                    type="text"
+                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                    value={editingTaskName}
+                                    onChange={(e) => setEditingTaskName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        saveTaskName(category.id, task.id);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingTaskId(null);
+                                      }
+                                    }}
+                                    autoFocus
+                                    onBlur={() => saveTaskName(category.id, task.id)}
+                                  />
+                                ) : (
+                                  <div className="flex items-center">
+                                    <span className={`${task.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                                      {task.name}
+                                    </span>
+                                    <button 
+                                      className="ml-2 text-gray-400 hover:text-blue-500 focus:outline-none"
+                                      onClick={() => startEditingTask(task.id, task.name)}
+                                      title="Edit task name"
+                                    >
+                                      <Edit size={14} />
+                                    </button>
+                                  </div>
+                                )}
                                 {/* Recurring task indicator */}
                                 {task.recurring && (
                                   <Repeat 
@@ -1232,7 +1415,7 @@ const Dashboard = () => {
                                           />
                                         </div>
                                         <span className="text-xs text-gray-500">
-                                          {subtask.completed ? subtask.completionDate : "Open"}
+                                          {subtask.completed ? formatDate(subtask.completionDate) : "Open"}
                                         </span>
                                         <button
                                           onClick={() => deleteSubtask(category.id, task.id, subtask.id)}
@@ -1259,10 +1442,10 @@ const Dashboard = () => {
                             </button>
                             <span className="text-sm text-gray-500 flex items-center">
                               <Clock size={14} className="mr-1" />
-                              {task.completed ? task.completionDate : "Open"}
+                              {task.completed ? formatDate(task.completionDate) : "Open"}
                             </span>
                             <button 
-                              onClick={() => deleteTask(category.id, task.id)}
+                              onClick={() => showDeleteOptions(category.id, task.id)}
                               className="text-gray-400 hover:text-red-500 focus:outline-none"
                             >
                               <Trash2 size={16} />
@@ -1332,8 +1515,72 @@ const Dashboard = () => {
           );
         })}
       </div>
+      
+      {/* Delete Confirmation Modal */}
+      {deleteType.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-medium mb-4">
+              Delete "{categories.find(c => c.id === deleteType.categoryId)?.tasks.find(t => t.id === deleteType.taskId)?.name}"
+            </h3>
+            
+            {categories.find(c => c.id === deleteType.categoryId)?.tasks.find(t => t.id === deleteType.taskId)?.recurring ? (
+              <>
+                <p className="mb-4">This is a recurring task. How would you like to delete it?</p>
+                <div className="space-y-2 mb-4">
+                  <button 
+                    onClick={() => handleDeleteTask('current')}
+                    className="w-full text-left px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                  >
+                    Delete only from this month
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteTask('future')}
+                    className="w-full text-left px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                  >
+                    Delete from this month and prevent future occurrences
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteTask('all')}
+                    className="w-full text-left px-4 py-2 border border-red-300 rounded hover:bg-red-50 text-red-600"
+                  >
+                    Delete completely (removes all past, present and future instances)
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mb-4">Are you sure you want to delete this task? This cannot be undone.</p>
+                <div className="flex justify-end space-x-3">
+                  <button 
+                    onClick={() => setDeleteType({ show: false, taskId: null, categoryId: null, type: 'single' })}
+                    className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteTask('all')}
+                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+            
+            <div className="flex justify-end mt-4">
+              <button 
+                onClick={() => setDeleteType({ show: false, taskId: null, categoryId: null, type: 'single' })}
+                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-export default Dashboard
+export default Dashboard;
