@@ -56,16 +56,23 @@ const Dashboard = () => {
           // Use existing months
           setMonthOptions(months.map(m => ({ id: m.id, name: m.month_name })));
           
-          // Sort months chronologically 
-          const sortedMonths = [...months].sort((a, b) => {
-            const [monthA, yearA] = a.month_name.split(' ');
-            const [monthB, yearB] = b.month_name.split(' ');
-            const dateA = new Date(parseInt(yearA), ["January", "February", "March", "April", "May", "June", 
-              "July", "August", "September", "October", "November", "December"].indexOf(monthA), 1);
-            const dateB = new Date(parseInt(yearB), ["January", "February", "March", "April", "May", "June", 
-              "July", "August", "September", "October", "November", "December"].indexOf(monthB), 1);
-            return dateB - dateA; // Newest first
-          });
+// Sort months chronologically (oldest to newest)
+const sortedMonths = [...months].sort((a, b) => {
+  const [monthA, yearA] = a.month_name.split(' ');
+  const [monthB, yearB] = b.month_name.split(' ');
+  const monthOrder = {
+    "January": 0, "February": 1, "March": 2, "April": 3, 
+    "May": 4, "June": 5, "July": 6, "August": 7,
+    "September": 8, "October": 9, "November": 10, "December": 11
+  };
+  
+  // First compare year
+  if (parseInt(yearA) !== parseInt(yearB)) {
+    return parseInt(yearA) - parseInt(yearB);
+  }
+  // If same year, compare month
+  return monthOrder[monthA] - monthOrder[monthB];
+});
 
           // Find first incomplete month
           const findIncompleteMonth = async () => {
