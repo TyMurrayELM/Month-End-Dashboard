@@ -1276,7 +1276,7 @@ const Dashboard = () => {
                 <div className="p-4">
                   <ul className="divide-y divide-gray-200">
                     {getFilteredTasks(filteredTasks).map(task => (
-                      <li key={task.id} className="py-3">
+                      <li key={task.id} className={`py-3 ${task.hasSubtasks ? 'bg-yellow-50 rounded' : ''}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3">
                             <button 
@@ -1547,6 +1547,14 @@ const Dashboard = () => {
                     Delete completely (removes all past, present and future instances)
                   </button>
                 </div>
+                <div className="flex justify-end mt-4">
+                  <button 
+                    onClick={() => setDeleteType({ show: false, taskId: null, categoryId: null, type: 'single' })}
+                    className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </>
             ) : (
               <>
@@ -1567,15 +1575,6 @@ const Dashboard = () => {
                 </div>
               </>
             )}
-            
-            <div className="flex justify-end mt-4">
-              <button 
-                onClick={() => setDeleteType({ show: false, taskId: null, categoryId: null, type: 'single' })}
-                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         </div>
       )}
