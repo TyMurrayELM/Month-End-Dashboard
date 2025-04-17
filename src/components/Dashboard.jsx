@@ -55,7 +55,44 @@ const Dashboard = () => {
         } else {
           // Use existing months
           setMonthOptions(months.map(m => ({ id: m.id, name: m.month_name })));
-          setCurrentMonthId(months[months.length - 1].id);
+          
+          // Find the last incomplete month
+          const findLastIncompleteMonth = async () => {
+            let selectedMonthId = months[months.length - 1].id; // Default to most recent
+            
+            // Check each month from newest to oldest
+            for (let i = months.length - 1; i >= 0; i--) {
+              const { data: monthTasks } = await supabase
+                .from('task_instances')
+                .select(`
+                  id,
+                  completed,
+                  task_templates(has_subtasks)
+                `)
+                .eq('month_id', months[i].id);
+                
+              // Check if all tasks are complete
+              const allComplete = monthTasks && monthTasks.every(task => {
+                if (!task.completed) return false;
+                
+                // If has subtasks, we'll need to check those too
+                if (task.task_templates?.has_subtasks) {
+                  return false; // This will be checked in loadTasksForMonth anyway
+                }
+                
+                return true;
+              });
+              
+              if (!allComplete) {
+                selectedMonthId = months[i].id;
+                break;
+              }
+            }
+            
+            setCurrentMonthId(selectedMonthId);
+          };
+          
+          await findLastIncompleteMonth();
         }
         
         // Load categories (without tasks at this point)
@@ -81,6 +118,7 @@ const Dashboard = () => {
     loadInitialData();
   }, []);
   
+  // Rest of the component is unchanged
   // Load tasks when month changes
   useEffect(() => {
     const loadTasksForMonth = async () => {
