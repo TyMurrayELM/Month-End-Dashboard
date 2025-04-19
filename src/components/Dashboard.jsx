@@ -1329,16 +1329,16 @@ const Dashboard = () => {
             </span>
           </div>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-4 mb-2">
+        <div className="w-full bg-gray-200 rounded-full h-4 mb-2 relative overflow-hidden">
+          <div className="absolute inset-0 w-full h-full"
+               style={{
+                 background: 'linear-gradient(90deg, #EF4444 0%, #F97316 33%, #FACC15 66%, #22C55E 100%)'
+               }}
+          ></div>
           <div 
-            className="h-4 rounded-full"
+            className="absolute top-0 bottom-0 right-0 bg-gray-200 h-full transition-all duration-300"
             style={{ 
-              width: `${getOverallCompletionStatus().percentage}%`,
-              background: `linear-gradient(90deg, 
-                #EF4444 0%, 
-                #F97316 50%, 
-                #FACC15 80%, 
-                #22C55E 100%)`
+              width: `${100 - getOverallCompletionStatus().percentage}%`
             }}
           ></div>
         </div>
