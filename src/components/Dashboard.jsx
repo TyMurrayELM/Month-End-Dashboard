@@ -1108,7 +1108,7 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="flex flex-col w-full min-h-screen bg-blue-50 p-4">
+    <div className="flex flex-col w-full min-h-screen bg-blue-100 p-4">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Month-End Dashboard</h1>
         <div className="flex items-center space-x-4">
