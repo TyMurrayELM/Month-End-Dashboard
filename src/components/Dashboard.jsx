@@ -47,6 +47,16 @@ const Dashboard = () => {
     }
   };
 
+  // Function to sort tasks alphabetically
+  const sortTasksAlphabetically = (tasks) => {
+    return [...tasks].sort((a, b) => a.name.localeCompare(b.name));
+  };
+  
+  // Function to sort subtasks alphabetically
+  const sortSubtasksAlphabetically = (subtasks) => {
+    return [...subtasks].sort((a, b) => a.name.localeCompare(b.name));
+  };
+
   // Load months and categories when component mounts
   useEffect(() => {
     const loadInitialData = async () => {
@@ -173,11 +183,6 @@ const Dashboard = () => {
     loadInitialData();
   }, []);
   
-  // Function to sort tasks alphabetically
-  const sortTasksAlphabetically = (tasks) => {
-    return [...tasks].sort((a, b) => a.name.localeCompare(b.name));
-  };
-  
   // Load tasks when month changes
   useEffect(() => {
     const loadTasksForMonth = async () => {
@@ -266,6 +271,9 @@ const Dashboard = () => {
               recurring: s.subtask_templates?.recurring || true,
               templateId: s.subtask_templates?.id
             }));
+            
+            // Sort subtasks alphabetically
+            task.subtasks = sortSubtasksAlphabetically(task.subtasks);
           }
           
           categoriesWithTasks[categoryIndex].tasks.push(task);
@@ -902,6 +910,10 @@ const Dashboard = () => {
         recurring: true,
         templateId: template[0].id
       });
+      
+      // Sort subtasks alphabetically after adding a new one
+      newCategories[categoryIndex].tasks[taskIndex].subtasks = 
+        sortSubtasksAlphabetically(newCategories[categoryIndex].tasks[taskIndex].subtasks);
       
       setCategories(newCategories);
       
