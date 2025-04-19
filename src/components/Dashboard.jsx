@@ -1541,15 +1541,53 @@ const Dashboard = () => {
                                             <input
                                               type="text"
                                               placeholder="Amount"
-                                              className="w-24 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                              className="w-24 px-1 py-0.5 text-xs border border-gray-300 rounded text-right"
                                               value={subtask.amount || ""}
                                               onChange={(e) => {
-                                                // Remove existing commas and non-digit characters
-                                                const rawValue = e.target.value.replace(/[^\d]/g, '');
+                                                // Allow digits and a single decimal point
+                                                let inputValue = e.target.value;
                                                 
-                                                // Format with commas for thousands
-                                                const formattedValue = rawValue === '' ? '' : 
-                                                  Number(rawValue).toLocaleString('en-US');
+                                                // First remove all commas
+                                                let rawValue = inputValue.replace(/,/g, '');
+                                                
+                                                // Validate that it's a valid decimal number format
+                                                // Only keep digits and at most one decimal point
+                                                const decimalCount = (rawValue.match(/\./g) || []).length;
+                                                if (decimalCount > 1) {
+                                                  // If more than one decimal, keep only the first one
+                                                  const parts = rawValue.split('.');
+                                                  rawValue = parts[0] + '.' + parts.slice(1).join('');
+                                                }
+                                                
+                                                // Remove any non-digit, non-decimal characters
+                                                rawValue = rawValue.replace(/[^\d.]/g, '');
+                                                
+                                                // Format the value nicely with commas for thousands
+                                                let formattedValue = '';
+                                                if (rawValue !== '') {
+                                                  // Parse as float to handle decimal properly
+                                                  const parsedValue = parseFloat(rawValue);
+                                                  if (!isNaN(parsedValue)) {
+                                                    // Check if the original input ends with a decimal point
+                                                    if (rawValue.endsWith('.')) {
+                                                      // Keep the decimal point when typing
+                                                      formattedValue = parsedValue.toLocaleString('en-US') + '.';
+                                                    } else if (rawValue.includes('.')) {
+                                                      // Get decimal places
+                                                      const decimalPlaces = rawValue.split('.')[1].length;
+                                                      // Format with fixed decimal places
+                                                      formattedValue = parsedValue.toLocaleString('en-US', {
+                                                        minimumFractionDigits: decimalPlaces,
+                                                        maximumFractionDigits: decimalPlaces
+                                                      });
+                                                    } else {
+                                                      // Integer value
+                                                      formattedValue = parsedValue.toLocaleString('en-US');
+                                                    }
+                                                  } else {
+                                                    formattedValue = '';
+                                                  }
+                                                }
                                                 
                                                 updateSubtaskAmount(category.id, task.id, subtask.id, formattedValue);
                                               }}
