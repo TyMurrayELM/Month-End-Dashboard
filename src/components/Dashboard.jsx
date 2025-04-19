@@ -1331,8 +1331,15 @@ const Dashboard = () => {
         </div>
         <div className="w-full bg-gray-200 rounded-full h-4 mb-2">
           <div 
-            className={`h-4 rounded-full ${deadlineStatus.isPastDeadline ? 'bg-red-500' : 'bg-blue-500'}`}
-            style={{ width: `${getOverallCompletionStatus().percentage}%` }}
+            className="h-4 rounded-full"
+            style={{ 
+              width: `${getOverallCompletionStatus().percentage}%`,
+              background: `linear-gradient(90deg, 
+                #EF4444 0%, 
+                #F97316 50%, 
+                #FACC15 80%, 
+                #22C55E 100%)`
+            }}
           ></div>
         </div>
         <div className="flex justify-between text-xs text-gray-500">
