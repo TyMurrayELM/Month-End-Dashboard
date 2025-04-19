@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit, DollarSign, CreditCard, Globe } from 'lucide-react';
+import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit, DollarSign } from 'lucide-react';
 import supabase from '../supabaseClient';
 
 const Dashboard = () => {
@@ -23,8 +23,7 @@ const Dashboard = () => {
   const [subtaskPaymentTypes, setSubtaskPaymentTypes] = useState({});
   const [subtaskPaidStatus, setSubtaskPaidStatus] = useState({});
 
-  // Constants for vendor statements category and payment types
-  const VENDOR_STATEMENTS_TITLE = 'Vendor Statements';
+  // Constants for payment types
   const PAYMENT_TYPES = {
     CREDIT_CARD: 'Credit Card',
     ACH: 'ACH',
@@ -193,7 +192,7 @@ const Dashboard = () => {
     loadInitialData();
   }, []);
   
-  // Load tasks when month changes
+  // Load tasks when month changes - FIXED to prevent infinite re-rendering
   useEffect(() => {
     const loadTasksForMonth = async () => {
       if (!currentMonthId || categories.length === 0) return;
@@ -226,87 +225,139 @@ const Dashboard = () => {
           
         if (tasksError) throw tasksError;
         
-        // Process categories with tasks
-        const categoriesWithTasks = [...categories];
-        
-        // Reset tasks in all categories
-        categoriesWithTasks.forEach(category => {
-          category.tasks = [];
-        });
-        
         // Process each task and add to its category
-        for (const instance of taskInstances) {
-          if (!instance.task_templates) continue;
+        setCategories(prevCategories => {
+          // Create a copy of the previous categories
+          const updatedCategories = prevCategories.map(category => ({
+            ...category,
+            tasks: [] // Reset tasks
+          }));
           
-          const categoryId = instance.task_templates.category_id;
-          const categoryIndex = categoriesWithTasks.findIndex(c => c.id === categoryId);
-          
-          if (categoryIndex === -1) continue;
-          
-          const task = {
-            id: instance.id,
-            name: instance.task_templates.name,
-            completed: instance.completed,
-            completionDate: instance.completion_date,
-            recurring: instance.task_templates.recurring,
-            templateId: instance.task_templates.id
-          };
-          
-          // If task has subtasks, load them
-          if (instance.task_templates.has_subtasks) {
-            task.hasSubtasks = true;
-            task.expanded = false;
+          // Process each task
+          for (const instance of taskInstances) {
+            if (!instance.task_templates) continue;
             
-            // Get subtasks for this task
-            const { data: subtasks, error: subtasksError } = await supabase
-              .from('subtask_instances')
-              .select(`
-                id,
-                completed,
-                completion_date,
-                amount,
-                subtask_templates(id, name, recurring)
-              `)
-              .eq('task_instance_id', instance.id);
-              
-            if (subtasksError) throw subtasksError;
+            const categoryId = instance.task_templates.category_id;
+            const categoryIndex = updatedCategories.findIndex(c => c.id === categoryId);
             
-            // Map subtasks to the expected format
-            task.subtasks = subtasks.map(s => ({
-              id: s.id,
-              name: s.subtask_templates?.name || '',
-              completed: s.completed,
-              completionDate: s.completion_date,
-              amount: s.amount || '',
-              recurring: s.subtask_templates?.recurring || true,
-              templateId: s.subtask_templates?.id
-            }));
+            if (categoryIndex === -1) continue;
             
-            // Sort subtasks alphabetically
-            task.subtasks = sortSubtasksAlphabetically(task.subtasks);
+            const task = {
+              id: instance.id,
+              name: instance.task_templates.name,
+              completed: instance.completed,
+              completionDate: instance.completion_date,
+              recurring: instance.task_templates.recurring,
+              templateId: instance.task_templates.id
+            };
+            
+            // If task has subtasks, include them
+            if (instance.task_templates.has_subtasks) {
+              task.hasSubtasks = true;
+              task.expanded = false;
+              task.subtasks = []; // Will be populated later
+            }
+            
+            updatedCategories[categoryIndex].tasks.push(task);
           }
           
-          categoriesWithTasks[categoryIndex].tasks.push(task);
+          // Sort tasks alphabetically
+          updatedCategories.forEach(category => {
+            category.tasks = sortTasksAlphabetically(category.tasks);
+          });
+          
+          return updatedCategories;
+        });
+        
+        // Load subtasks for tasks that have them
+        for (const instance of taskInstances) {
+          if (!instance.task_templates?.has_subtasks) continue;
+          
+          const categoryId = instance.task_templates.category_id;
+          
+          // Get subtasks for this task
+          const { data: subtasks, error: subtasksError } = await supabase
+            .from('subtask_instances')
+            .select(`
+              id,
+              completed,
+              completion_date,
+              amount,
+              payment_type,
+              is_paid,
+              subtask_templates(id, name, recurring)
+            `)
+            .eq('task_instance_id', instance.id);
+            
+          if (subtasksError) throw subtasksError;
+          
+          // Map subtasks to the expected format
+          const formattedSubtasks = subtasks.map(s => ({
+            id: s.id,
+            name: s.subtask_templates?.name || '',
+            completed: s.completed,
+            completionDate: s.completion_date,
+            amount: s.amount || '',
+            recurring: s.subtask_templates?.recurring || true,
+            templateId: s.subtask_templates?.id,
+            paymentType: s.payment_type || '',
+            isPaid: s.is_paid || false
+          }));
+          
+          // Sort subtasks alphabetically
+          const sortedSubtasks = sortSubtasksAlphabetically(formattedSubtasks);
+          
+          // Update payment types and paid status
+          sortedSubtasks.forEach(subtask => {
+            if (subtask.paymentType) {
+              setSubtaskPaymentTypes(prev => ({
+                ...prev,
+                [subtask.id]: subtask.paymentType
+              }));
+            }
+            
+            if (subtask.isPaid) {
+              setSubtaskPaidStatus(prev => ({
+                ...prev,
+                [subtask.id]: subtask.isPaid
+              }));
+            }
+          });
+          
+          // Update the specific task with its subtasks
+          setCategories(prevCategories => {
+            const updatedCategories = [...prevCategories];
+            const categoryIndex = updatedCategories.findIndex(c => c.id === categoryId);
+            if (categoryIndex === -1) return prevCategories;
+            
+            const taskIndex = updatedCategories[categoryIndex].tasks.findIndex(
+              t => t.id === instance.id
+            );
+            if (taskIndex === -1) return prevCategories;
+            
+            updatedCategories[categoryIndex].tasks[taskIndex].subtasks = sortedSubtasks;
+            
+            return updatedCategories;
+          });
         }
         
-        // Sort tasks alphabetically in each category
-        categoriesWithTasks.forEach(category => {
-          category.tasks = sortTasksAlphabetically(category.tasks);
-        });
-        
         // Check if all tasks are complete
-        const allTasksComplete = categoriesWithTasks.every(category => 
-          category.tasks.every(task => 
-            task.completed && (!task.hasSubtasks || task.subtasks.every(subtask => subtask.completed))
-          )
-        );
-        
-        setCategories(categoriesWithTasks);
-        setDeadlineStatus({
-          deadlineDate,
-          isPastDeadline: today > deadlineDate,
-          isComplete: allTasksComplete
+        setCategories(prevCategories => {
+          const allTasksComplete = prevCategories.every(category => 
+            category.tasks.every(task => 
+              task.completed && (!task.hasSubtasks || task.subtasks?.every(subtask => subtask.completed))
+            )
+          );
+          
+          setDeadlineStatus({
+            deadlineDate,
+            isPastDeadline: today > deadlineDate,
+            isComplete: allTasksComplete
+          });
+          
+          return prevCategories;
         });
+        
       } catch (error) {
         console.error("Error loading tasks:", error);
       } finally {
@@ -315,7 +366,7 @@ const Dashboard = () => {
     };
     
     loadTasksForMonth();
-  }, [currentMonthId, categories.length]);
+  }, [currentMonthId, categories.length]); // Removed 'categories' from dependencies
   
   // Calculate 7th business day of a month
   const calculateDeadlineDate = (monthName) => {
@@ -381,7 +432,9 @@ const Dashboard = () => {
               subtask_template_id: st.id,
               completed: false,
               completion_date: null,
-              amount: ''
+              amount: '',
+              payment_type: null,
+              is_paid: false
             }));
             
             // Insert all subtask instances
@@ -497,7 +550,9 @@ const Dashboard = () => {
               subtask_template_id: st.id,
               completed: false,
               completion_date: null,
-              amount: ''
+              amount: '',
+              payment_type: null,
+              is_paid: false
             }));
             
             // Insert all subtask instances
@@ -728,20 +783,48 @@ const Dashboard = () => {
     }
   };
 
-  // Payment type handling functions
-  const setSubtaskPaymentType = (subtaskId, paymentType) => {
-    setSubtaskPaymentTypes(prev => ({
-      ...prev,
-      [subtaskId]: paymentType
-    }));
+  // Payment type handling functions with database persistence
+  const setSubtaskPaymentType = async (subtaskId, paymentType) => {
+    try {
+      // Update in database
+      const { error } = await supabase
+        .from('subtask_instances')
+        .update({ payment_type: paymentType })
+        .eq('id', subtaskId);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setSubtaskPaymentTypes(prev => ({
+        ...prev,
+        [subtaskId]: paymentType
+      }));
+    } catch (error) {
+      console.error("Error updating payment type:", error);
+    }
   };
 
-  // Toggle payment status
-  const togglePaidStatus = (subtaskId) => {
-    setSubtaskPaidStatus(prev => ({
-      ...prev,
-      [subtaskId]: !prev[subtaskId]
-    }));
+  // Toggle payment status with database persistence
+  const togglePaidStatus = async (subtaskId) => {
+    try {
+      const newPaidStatus = !subtaskPaidStatus[subtaskId];
+      
+      // Update in database
+      const { error } = await supabase
+        .from('subtask_instances')
+        .update({ is_paid: newPaidStatus })
+        .eq('id', subtaskId);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setSubtaskPaidStatus(prev => ({
+        ...prev,
+        [subtaskId]: newPaidStatus
+      }));
+    } catch (error) {
+      console.error("Error updating paid status:", error);
+    }
   };
   
   // Toggle subtask completion status
@@ -915,7 +998,9 @@ const Dashboard = () => {
           subtask_template_id: template[0].id,
           completed: false,
           completion_date: null,
-          amount: ''
+          amount: '',
+          payment_type: null,
+          is_paid: false
         }])
         .select();
         
@@ -934,7 +1019,9 @@ const Dashboard = () => {
         completionDate: null,
         amount: '',
         recurring: true,
-        templateId: template[0].id
+        templateId: template[0].id,
+        paymentType: null,
+        isPaid: false
       });
       
       // Sort subtasks alphabetically after adding a new one
@@ -1413,8 +1500,8 @@ const Dashboard = () => {
                                   <ul className="space-y-2">
                                   {task.subtasks && task.subtasks.map(subtask => {
                                     const isVendorSubtask = isVendorStatementsTask(task.name);
-                                    const isPaid = subtaskPaidStatus[subtask.id] || false;
-                                    const paymentType = subtaskPaymentTypes[subtask.id] || '';
+                                    const isPaid = subtaskPaidStatus[subtask.id] || subtask.isPaid || false;
+                                    const paymentType = subtaskPaymentTypes[subtask.id] || subtask.paymentType || '';
                                     
                                     return (
                                       <li key={subtask.id} className="flex items-center justify-between border-b border-gray-100 pb-2">
