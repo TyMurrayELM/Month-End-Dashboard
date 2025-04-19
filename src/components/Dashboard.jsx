@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit } from 'lucide-react';
+import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit, DollarSign, CreditCard, Globe } from 'lucide-react';
 import supabase from '../supabaseClient';
 
 const Dashboard = () => {
@@ -20,6 +20,16 @@ const Dashboard = () => {
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [editingTaskName, setEditingTaskName] = useState('');
   const [deleteType, setDeleteType] = useState({ show: false, taskId: null, categoryId: null, type: 'single' });
+  const [subtaskPaymentTypes, setSubtaskPaymentTypes] = useState({});
+  const [subtaskPaidStatus, setSubtaskPaidStatus] = useState({});
+
+  // Constants for vendor statements category and payment types
+  const VENDOR_STATEMENTS_TITLE = 'Vendor Statements';
+  const PAYMENT_TYPES = {
+    CREDIT_CARD: 'Credit Card',
+    ACH: 'ACH',
+    ONLINE_PORTAL: 'Online Portal'
+  };
 
   // Format date nicely
   const formatDate = (dateString) => {
@@ -717,6 +727,22 @@ const Dashboard = () => {
       console.error("Error updating task status:", error);
     }
   };
+
+  // Payment type handling functions
+  const setSubtaskPaymentType = (subtaskId, paymentType) => {
+    setSubtaskPaymentTypes(prev => ({
+      ...prev,
+      [subtaskId]: paymentType
+    }));
+  };
+
+  // Toggle payment status
+  const togglePaidStatus = (subtaskId) => {
+    setSubtaskPaidStatus(prev => ({
+      ...prev,
+      [subtaskId]: !prev[subtaskId]
+    }));
+  };
   
   // Toggle subtask completion status
   const toggleSubtaskStatus = async (categoryId, taskId, subtaskId) => {
@@ -1098,6 +1124,11 @@ const Dashboard = () => {
       ))
     );
   };
+
+  // Check if task is the Vendor Statements task
+  const isVendorStatementsTask = (taskName) => {
+    return taskName === 'Vendor Statements Received/Reconciled';
+  };
   
   if (loading) {
     return (
@@ -1108,7 +1139,7 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="flex flex-col w-full min-h-screen bg-blue-100 p-4">
+    <div className="flex flex-col w-full min-h-screen bg-blue-50 p-4">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Month-End Dashboard</h1>
         <div className="flex items-center space-x-4">
@@ -1380,64 +1411,101 @@ const Dashboard = () => {
                                   </div>
                                   
                                   <ul className="space-y-2">
-                                  {task.subtasks && task.subtasks.map(subtask => (
-                                    <li key={subtask.id} className="flex items-center justify-between border-b border-gray-100 pb-2">
-                                      <div className="flex items-center space-x-2">
-                                        <button 
-                                          onClick={() => toggleSubtaskStatus(category.id, task.id, subtask.id)}
-                                          className="focus:outline-none"
-                                        >
-                                          {subtask.completed ? (
-                                            <CheckCircle size={16} className="text-green-500" />
-                                          ) : (
-                                            <Circle size={16} className="text-gray-400" />
-                                          )}
-                                        </button>
-                                        <div className="flex items-center">
-                                          <span className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-600'}`}>
-                                            {subtask.name}
-                                          </span>
-                                          {subtask.recurring && (
-                                            <Repeat 
-                                              size={14} 
-                                              className="ml-2 text-blue-500" 
-                                              title="Recurring vendor"
+                                  {task.subtasks && task.subtasks.map(subtask => {
+                                    const isVendorSubtask = isVendorStatementsTask(task.name);
+                                    const isPaid = subtaskPaidStatus[subtask.id] || false;
+                                    const paymentType = subtaskPaymentTypes[subtask.id] || '';
+                                    
+                                    return (
+                                      <li key={subtask.id} className="flex items-center justify-between border-b border-gray-100 pb-2">
+                                        <div className="flex items-center space-x-2">
+                                          <button 
+                                            onClick={() => toggleSubtaskStatus(category.id, task.id, subtask.id)}
+                                            className="focus:outline-none"
+                                          >
+                                            {subtask.completed ? (
+                                              <CheckCircle size={16} className="text-green-500" />
+                                            ) : (
+                                              <Circle size={16} className="text-gray-400" />
+                                            )}
+                                          </button>
+                                          <div className="flex items-center">
+                                            <span className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-600'}`}>
+                                              {subtask.name}
+                                            </span>
+                                            {subtask.recurring && (
+                                              <Repeat 
+                                                size={14} 
+                                                className="ml-2 text-blue-500" 
+                                                title="Recurring vendor"
+                                              />
+                                            )}
+                                            {isVendorSubtask && isPaid && (
+                                              <div className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded-md flex items-center">
+                                                <DollarSign size={12} className="mr-1" />
+                                                Paid
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <div className="flex items-center">
+                                            <span className="text-xs text-gray-500 mr-1">$</span>
+                                            <input
+                                              type="text"
+                                              placeholder="Amount"
+                                              className="w-24 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                              value={subtask.amount || ""}
+                                              onChange={(e) => {
+                                                // Remove existing commas and non-digit characters
+                                                const rawValue = e.target.value.replace(/[^\d]/g, '');
+                                                
+                                                // Format with commas for thousands
+                                                const formattedValue = rawValue === '' ? '' : 
+                                                  Number(rawValue).toLocaleString('en-US');
+                                                
+                                                updateSubtaskAmount(category.id, task.id, subtask.id, formattedValue);
+                                              }}
                                             />
+                                          </div>
+                                          
+                                          {/* Payment options for Vendor Statements subtasks - now on same line */}
+                                          {isVendorSubtask && (
+                                            <>
+                                              <select 
+                                                className="text-xs border border-gray-300 rounded py-0.5 px-1"
+                                                value={paymentType}
+                                                onChange={(e) => setSubtaskPaymentType(subtask.id, e.target.value)}
+                                              >
+                                                <option value="">Payment Type</option>
+                                                <option value={PAYMENT_TYPES.CREDIT_CARD}>Credit Card</option>
+                                                <option value={PAYMENT_TYPES.ACH}>ACH</option>
+                                                <option value={PAYMENT_TYPES.ONLINE_PORTAL}>Online Portal</option>
+                                              </select>
+                                              <button
+                                                className={`text-xs px-2 py-0.5 rounded ${isPaid 
+                                                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                                                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
+                                                onClick={() => togglePaidStatus(subtask.id)}
+                                              >
+                                                {isPaid ? 'Paid' : 'Mark Paid'}
+                                              </button>
+                                            </>
                                           )}
+                                          
+                                          <span className="text-xs text-gray-500">
+                                            {subtask.completed ? formatDate(subtask.completionDate) : "Open"}
+                                          </span>
+                                          <button
+                                            onClick={() => deleteSubtask(category.id, task.id, subtask.id)}
+                                            className="text-gray-400 hover:text-red-500 focus:outline-none"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
                                         </div>
-                                      </div>
-                                      <div className="flex items-center space-x-2">
-                                        <div className="flex items-center">
-                                          <span className="text-xs text-gray-500 mr-1">$</span>
-                                          <input
-                                            type="text"
-                                            placeholder="Amount"
-                                            className="w-24 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                            value={subtask.amount || ""}
-                                            onChange={(e) => {
-                                              // Remove existing commas and non-digit characters
-                                              const rawValue = e.target.value.replace(/[^\d]/g, '');
-                                              
-                                              // Format with commas for thousands
-                                              const formattedValue = rawValue === '' ? '' : 
-                                                Number(rawValue).toLocaleString('en-US');
-                                              
-                                              updateSubtaskAmount(category.id, task.id, subtask.id, formattedValue);
-                                            }}
-                                          />
-                                        </div>
-                                        <span className="text-xs text-gray-500">
-                                          {subtask.completed ? formatDate(subtask.completionDate) : "Open"}
-                                        </span>
-                                        <button
-                                          onClick={() => deleteSubtask(category.id, task.id, subtask.id)}
-                                          className="text-gray-400 hover:text-red-500 focus:outline-none"
-                                        >
-                                          <Trash2 size={12} />
-                                        </button>
-                                      </div>
-                                    </li>
-                                  ))}
+                                      </li>
+                                    );
+                                  })}
                                   </ul>
                                 </div>
                               )}
