@@ -452,7 +452,7 @@ const Dashboard = () => {
     }
   };
   
-  // Create a new month
+  // FIXED: Create a new month with proper recurring task handling
   const createNextMonth = async () => {
     try {
       // Get current month data to determine next month
@@ -511,16 +511,32 @@ const Dashboard = () => {
         
       if (createError) throw createError;
       
-      // Get recurring task templates only for continuing months
-      const { data: taskTemplates, error: templatesError } = await supabase
-        .from('task_templates')
-        .select('*')
-        .eq('recurring', true);
+      // FIXED: Get all task instances from current month that should recur
+      // This approach looks at what tasks exist in the current month and checks their template recurring status
+      const { data: currentMonthTasks, error: currentTasksError } = await supabase
+        .from('task_instances')
+        .select(`
+          id,
+          task_template_id,
+          task_templates!inner(
+            id,
+            name,
+            recurring,
+            has_subtasks,
+            category_id
+          )
+        `)
+        .eq('month_id', currentMonthId)
+        .eq('task_templates.recurring', true); // Only get tasks whose templates are marked as recurring
         
-      if (templatesError) throw templatesError;
+      if (currentTasksError) throw currentTasksError;
       
-      // Create recurring task instances
-      for (const template of taskTemplates) {
+      console.log(`Creating ${currentMonthTasks.length} recurring tasks for ${nextMonthName}`);
+      
+      // Create task instances for all recurring tasks
+      for (const currentTask of currentMonthTasks) {
+        const template = currentTask.task_templates;
+        
         const { data: taskInstance, error: taskError } = await supabase
           .from('task_instances')
           .insert([{
@@ -535,19 +551,29 @@ const Dashboard = () => {
         
         // If this is a task with subtasks, create subtask instances
         if (template.has_subtasks && taskInstance && taskInstance.length > 0) {
-          const { data: subtaskTemplates, error: subtasksError } = await supabase
-            .from('subtask_templates')
-            .select('*')
-            .eq('task_template_id', template.id)
-            .eq('recurring', true); // Only recurring subtasks
+          // Get subtask instances from current month to know which subtasks to recreate
+          const { data: currentSubtasks, error: currentSubtasksError } = await supabase
+            .from('subtask_instances')
+            .select(`
+              id,
+              subtask_template_id,
+              subtask_templates!inner(
+                id,
+                name,
+                recurring,
+                task_template_id
+              )
+            `)
+            .eq('task_instance_id', currentTask.id)
+            .eq('subtask_templates.recurring', true); // Only recurring subtasks
             
-          if (subtasksError) throw subtasksError;
+          if (currentSubtasksError) throw currentSubtasksError;
           
-          if (subtaskTemplates && subtaskTemplates.length > 0) {
+          if (currentSubtasks && currentSubtasks.length > 0) {
             // Build array of subtask instances to insert
-            const subtaskInstances = subtaskTemplates.map(st => ({
+            const subtaskInstances = currentSubtasks.map(cs => ({
               task_instance_id: taskInstance[0].id,
-              subtask_template_id: st.id,
+              subtask_template_id: cs.subtask_template_id,
               completed: false,
               completion_date: null,
               amount: '',
@@ -568,6 +594,9 @@ const Dashboard = () => {
       // Update months and select the new month
       setMonthOptions([...monthOptions, { id: newMonth[0].id, name: nextMonthName }]);
       setCurrentMonthId(newMonth[0].id);
+      
+      // Show success message
+      alert(`Successfully created ${nextMonthName} with ${currentMonthTasks.length} recurring tasks`);
       
     } catch (error) {
       console.error("Error creating next month:", error);
