@@ -88,7 +88,7 @@ const Dashboard = () => {
              "July", "August", "September", "October", "November", "December"][currentDate.getMonth()]
           } ${currentDate.getFullYear()}`;
           
-          // Calculate deadline (7th business day)
+          // Calculate deadline (7th business day of the NEXT month)
           const deadlineDate = calculateDeadlineDate(monthName);
           
           const { data: newMonth, error: newMonthError } = await supabase
@@ -368,14 +368,22 @@ const Dashboard = () => {
     loadTasksForMonth();
   }, [currentMonthId, categories.length]); // Removed 'categories' from dependencies
   
-  // Calculate 7th business day of a month
+  // Calculate 7th business day of the NEXT month (since we're closing books for the selected month)
   const calculateDeadlineDate = (monthName) => {
     const [month, year] = monthName.split(' ');
     const monthIndex = ["January", "February", "March", "April", "May", "June", 
                       "July", "August", "September", "October", "November", "December"]
                       .indexOf(month);
     
-    const date = new Date(parseInt(year), monthIndex, 1);
+    // Calculate the NEXT month (since deadline is for closing the books of the selected month)
+    let nextMonthIndex = (monthIndex + 1) % 12;
+    let nextYear = parseInt(year);
+    if (nextMonthIndex === 0) { // If we're moving from December to January
+      nextYear++;
+    }
+    
+    // Start at the 1st of the next month
+    const date = new Date(nextYear, nextMonthIndex, 1);
     let businessDays = 0;
     
     while (businessDays < 7) {
@@ -497,7 +505,7 @@ const Dashboard = () => {
         throw existingMonthError;
       }
       
-      // Calculate deadline date
+      // Calculate deadline date (7th business day of the month AFTER nextMonthName)
       const deadlineDate = calculateDeadlineDate(nextMonthName);
       
       // Create new month
