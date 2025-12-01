@@ -209,7 +209,17 @@ const Dashboard = () => {
           
         if (monthError) throw monthError;
         
-        const deadlineDate = new Date(monthData.deadline_date);
+        // Parse deadline date - handle timezone by treating as local date
+        // This prevents the date from rolling back a day due to UTC conversion
+        const rawDeadline = monthData.deadline_date;
+        let deadlineDate;
+        if (rawDeadline.includes('T')) {
+          // If it has time component, extract just the date part
+          deadlineDate = new Date(rawDeadline.split('T')[0] + 'T12:00:00');
+        } else {
+          // If it's just a date string
+          deadlineDate = new Date(rawDeadline + 'T12:00:00');
+        }
         const today = new Date();
         
         // Get tasks for this month with their templates
