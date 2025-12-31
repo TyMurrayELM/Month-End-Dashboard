@@ -66,6 +66,31 @@ const Dashboard = () => {
     return [...subtasks].sort((a, b) => a.name.localeCompare(b.name));
   };
 
+  // Helper function to sort months chronologically (oldest to newest)
+  const sortMonthsChronologically = (months) => {
+    const monthOrder = {
+      "January": 0, "February": 1, "March": 2, "April": 3, 
+      "May": 4, "June": 5, "July": 6, "August": 7,
+      "September": 8, "October": 9, "November": 10, "December": 11
+    };
+    
+    return [...months].sort((a, b) => {
+      // Handle both {name: "Month Year"} and {month_name: "Month Year"} formats
+      const nameA = a.name || a.month_name;
+      const nameB = b.name || b.month_name;
+      
+      const [monthA, yearA] = nameA.split(' ');
+      const [monthB, yearB] = nameB.split(' ');
+      
+      // First compare year
+      if (parseInt(yearA) !== parseInt(yearB)) {
+        return parseInt(yearA) - parseInt(yearB);
+      }
+      // If same year, compare month
+      return monthOrder[monthA] - monthOrder[monthB];
+    });
+  };
+
   // Load months and categories when component mounts
   useEffect(() => {
     const loadInitialData = async () => {
@@ -104,26 +129,9 @@ const Dashboard = () => {
           // After creating month, create task instances from templates
           await createTaskInstancesForMonth(newMonth[0].id);
         } else {
-          // Use existing months
-          setMonthOptions(months.map(m => ({ id: m.id, name: m.month_name })));
-          
-          // Sort months chronologically (oldest to newest)
-          const sortedMonths = [...months].sort((a, b) => {
-            const [monthA, yearA] = a.month_name.split(' ');
-            const [monthB, yearB] = b.month_name.split(' ');
-            const monthOrder = {
-              "January": 0, "February": 1, "March": 2, "April": 3, 
-              "May": 4, "June": 5, "July": 6, "August": 7,
-              "September": 8, "October": 9, "November": 10, "December": 11
-            };
-            
-            // First compare year
-            if (parseInt(yearA) !== parseInt(yearB)) {
-              return parseInt(yearA) - parseInt(yearB);
-            }
-            // If same year, compare month
-            return monthOrder[monthA] - monthOrder[monthB];
-          });
+          // Sort months chronologically (oldest to newest) and use for dropdown
+          const sortedMonths = sortMonthsChronologically(months);
+          setMonthOptions(sortedMonths.map(m => ({ id: m.id, name: m.month_name })));
 
           // Find first incomplete month
           const findIncompleteMonth = async () => {
@@ -609,8 +617,9 @@ const Dashboard = () => {
         }
       }
       
-      // Update months and select the new month
-      setMonthOptions([...monthOptions, { id: newMonth[0].id, name: nextMonthName }]);
+      // Update months and select the new month - sort chronologically after adding
+      const updatedMonths = sortMonthsChronologically([...monthOptions, { id: newMonth[0].id, name: nextMonthName }]);
+      setMonthOptions(updatedMonths);
       setCurrentMonthId(newMonth[0].id);
       
       // Show success message
