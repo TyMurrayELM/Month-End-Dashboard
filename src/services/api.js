@@ -5,8 +5,9 @@ export const getCategories = async () => {
   const { data, error } = await supabase
     .from('categories')
     .select('*')
-    .order('order_index');
-    
+    .order('order_index')
+    .range(0, 9999);
+
   if (error) throw error;
   return data;
 };
@@ -16,8 +17,9 @@ export const getMonths = async () => {
   const { data, error } = await supabase
     .from('months')
     .select('*')
-    .order('month_name');
-    
+    .order('month_name')
+    .range(0, 9999);
+
   if (error) throw error;
   return data;
 };
@@ -65,7 +67,8 @@ const createTaskInstancesForMonth = async (monthId) => {
   const { data: templates, error: templatesError } = await supabase
     .from('task_templates')
     .select('*')
-    .eq('recurring', true);
+    .eq('recurring', true)
+    .range(0, 9999);
     
   if (templatesError) throw templatesError;
   
@@ -91,7 +94,8 @@ const createTaskInstancesForMonth = async (monthId) => {
         .from('subtask_templates')
         .select('*')
         .eq('task_template_id', template.id)
-        .eq('recurring', true);
+        .eq('recurring', true)
+        .range(0, 9999);
         
       if (subtasksError) throw subtasksError;
       
@@ -131,7 +135,8 @@ export const getTasksForMonth = async (monthId) => {
         category_id
       )
     `)
-    .eq('month_id', monthId);
+    .eq('month_id', monthId)
+    .range(0, 9999);
     
   if (taskError) throw taskError;
   
@@ -162,7 +167,8 @@ export const getTasksForMonth = async (monthId) => {
             recurring
           )
         `)
-        .eq('task_instance_id', instance.id);
+        .eq('task_instance_id', instance.id)
+        .range(0, 9999);
         
       if (subtaskError) throw subtaskError;
       

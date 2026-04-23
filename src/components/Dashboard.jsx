@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit, DollarSign } from 'lucide-react';
+import { CheckCircle, Circle, Clock, Trash2, Plus, ChevronDown, ChevronUp, Filter, AlertTriangle, CheckSquare, Repeat, Edit, X } from 'lucide-react';
 import supabase from '../supabaseClient';
+import { MONTH_NAMES, VENDOR_STATEMENTS_TASK_NAME } from '../constants';
+import SubtaskSection from './SubtaskSection';
 
 const Dashboard = () => {
   const [categories, setCategories] = useState([]);
@@ -22,12 +24,13 @@ const Dashboard = () => {
   const [deleteType, setDeleteType] = useState({ show: false, taskId: null, categoryId: null, type: 'single' });
   const [subtaskPaymentTypes, setSubtaskPaymentTypes] = useState({});
   const [subtaskPaidStatus, setSubtaskPaidStatus] = useState({});
+  const [errorMessage, setErrorMessage] = useState(null);
 
-  // Constants for payment types
-  const PAYMENT_TYPES = {
-    CREDIT_CARD: 'Credit Card',
-    ACH: 'ACH',
-    ONLINE_PORTAL: 'Online Portal'
+  // Surface an async failure in the UI and keep the console trace for debugging.
+  const showError = (context, error) => {
+    console.error(context, error);
+    const detail = error?.message || (typeof error === 'string' ? error : 'Unknown error');
+    setErrorMessage(`${context} ${detail}`);
   };
 
   // Format date nicely
@@ -56,38 +59,22 @@ const Dashboard = () => {
     }
   };
 
-  // Function to sort tasks alphabetically
-  const sortTasksAlphabetically = (tasks) => {
-    return [...tasks].sort((a, b) => a.name.localeCompare(b.name));
-  };
-  
-  // Function to sort subtasks alphabetically
-  const sortSubtasksAlphabetically = (subtasks) => {
-    return [...subtasks].sort((a, b) => a.name.localeCompare(b.name));
-  };
+  const sortByName = (items) => [...items].sort((a, b) => a.name.localeCompare(b.name));
 
   // Helper function to sort months chronologically (oldest to newest)
   const sortMonthsChronologically = (months) => {
-    const monthOrder = {
-      "January": 0, "February": 1, "March": 2, "April": 3, 
-      "May": 4, "June": 5, "July": 6, "August": 7,
-      "September": 8, "October": 9, "November": 10, "December": 11
-    };
-    
     return [...months].sort((a, b) => {
       // Handle both {name: "Month Year"} and {month_name: "Month Year"} formats
       const nameA = a.name || a.month_name;
       const nameB = b.name || b.month_name;
-      
+
       const [monthA, yearA] = nameA.split(' ');
       const [monthB, yearB] = nameB.split(' ');
-      
-      // First compare year
+
       if (parseInt(yearA) !== parseInt(yearB)) {
         return parseInt(yearA) - parseInt(yearB);
       }
-      // If same year, compare month
-      return monthOrder[monthA] - monthOrder[monthB];
+      return MONTH_NAMES.indexOf(monthA) - MONTH_NAMES.indexOf(monthB);
     });
   };
 
@@ -101,17 +88,15 @@ const Dashboard = () => {
         const { data: months, error: monthsError } = await supabase
           .from('months')
           .select('*')
-          .order('month_name');
+          .order('month_name')
+          .range(0, 9999);
           
         if (monthsError) throw monthsError;
         
         // Create initial month if none exist
         if (!months || months.length === 0) {
           const currentDate = new Date();
-          const monthName = `${
-            ["January", "February", "March", "April", "May", "June", 
-             "July", "August", "September", "October", "November", "December"][currentDate.getMonth()]
-          } ${currentDate.getFullYear()}`;
+          const monthName = `${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
           
           // Calculate deadline (7th business day of the NEXT month)
           const deadlineDate = calculateDeadlineDate(monthName);
@@ -153,7 +138,8 @@ const Dashboard = () => {
               const { data: tasks } = await supabase
                 .from('task_instances')
                 .select('id')
-                .eq('month_id', month.id);
+                .eq('month_id', month.id)
+                .range(0, 9999);
                 
               if (tasks?.length) {
                 const { data: subtasks } = await supabase
@@ -181,7 +167,8 @@ const Dashboard = () => {
         const { data: categoriesData, error: categoriesError } = await supabase
           .from('categories')
           .select('*')
-          .order('order_index');
+          .order('order_index')
+          .range(0, 9999);
           
         if (categoriesError) throw categoriesError;
         
@@ -191,7 +178,7 @@ const Dashboard = () => {
           tasks: []
         })));
       } catch (error) {
-        console.error("Error loading initial data:", error);
+        showError("Error loading initial data:", error);
       } finally {
         setLoading(false);
       }
@@ -217,17 +204,8 @@ const Dashboard = () => {
           
         if (monthError) throw monthError;
         
-        // Parse deadline date - handle timezone by treating as local date
-        // This prevents the date from rolling back a day due to UTC conversion
-        const rawDeadline = monthData.deadline_date;
-        let deadlineDate;
-        if (rawDeadline.includes('T')) {
-          // If it has time component, extract just the date part
-          deadlineDate = new Date(rawDeadline.split('T')[0] + 'T12:00:00');
-        } else {
-          // If it's just a date string
-          deadlineDate = new Date(rawDeadline + 'T12:00:00');
-        }
+        // Parse deadline as local date (substring(0,10) + noon avoids UTC rollback).
+        const deadlineDate = new Date(monthData.deadline_date.substring(0, 10) + 'T12:00:00');
         const today = new Date();
         
         // Get tasks for this month with their templates
@@ -239,159 +217,130 @@ const Dashboard = () => {
             completion_date,
             task_templates(id, name, recurring, has_subtasks, category_id)
           `)
-          .eq('month_id', currentMonthId);
+          .eq('month_id', currentMonthId)
+          .range(0, 9999);
           
         if (tasksError) throw tasksError;
         
-        // Process each task and add to its category
-        setCategories(prevCategories => {
-          // Create a copy of the previous categories
-          const updatedCategories = prevCategories.map(category => ({
-            ...category,
-            tasks: [] // Reset tasks
-          }));
-          
-          // Process each task
-          for (const instance of taskInstances) {
-            if (!instance.task_templates) continue;
-            
-            const categoryId = instance.task_templates.category_id;
-            const categoryIndex = updatedCategories.findIndex(c => c.id === categoryId);
-            
-            if (categoryIndex === -1) continue;
-            
-            const task = {
-              id: instance.id,
-              name: instance.task_templates.name,
-              completed: instance.completed,
-              completionDate: instance.completion_date,
-              recurring: instance.task_templates.recurring,
-              templateId: instance.task_templates.id
-            };
-            
-            // If task has subtasks, include them
-            if (instance.task_templates.has_subtasks) {
-              task.hasSubtasks = true;
-              task.expanded = false;
-              task.subtasks = []; // Will be populated later
-            }
-            
-            updatedCategories[categoryIndex].tasks.push(task);
-          }
-          
-          // Sort tasks alphabetically
-          updatedCategories.forEach(category => {
-            category.tasks = sortTasksAlphabetically(category.tasks);
-          });
-          
-          return updatedCategories;
-        });
-        
-        // Load subtasks for tasks that have them
+        // Group tasks by category and track which instances need subtasks.
+        const tasksByCategoryId = {};
+        const subtaskFetches = [];
+
         for (const instance of taskInstances) {
-          if (!instance.task_templates?.has_subtasks) continue;
-          
+          if (!instance.task_templates) continue;
           const categoryId = instance.task_templates.category_id;
-          
-          // Get subtasks for this task
-          const { data: subtasks, error: subtasksError } = await supabase
-            .from('subtask_instances')
-            .select(`
-              id,
-              completed,
-              completion_date,
-              amount,
-              payment_type,
-              is_paid,
-              subtask_templates(id, name, recurring)
-            `)
-            .eq('task_instance_id', instance.id);
-            
-          if (subtasksError) throw subtasksError;
-          
-          // Map subtasks to the expected format
-          const formattedSubtasks = subtasks.map(s => ({
+
+          const task = {
+            id: instance.id,
+            name: instance.task_templates.name,
+            completed: instance.completed,
+            completionDate: instance.completion_date,
+            recurring: instance.task_templates.recurring,
+            templateId: instance.task_templates.id,
+          };
+
+          if (instance.task_templates.has_subtasks) {
+            task.hasSubtasks = true;
+            task.expanded = false;
+            task.subtasks = [];
+            subtaskFetches.push(instance.id);
+          }
+
+          if (!tasksByCategoryId[categoryId]) tasksByCategoryId[categoryId] = [];
+          tasksByCategoryId[categoryId].push(task);
+        }
+
+        // Fetch all subtask lists in parallel.
+        const subtaskResults = await Promise.all(
+          subtaskFetches.map(async (instanceId) => {
+            const { data, error } = await supabase
+              .from('subtask_instances')
+              .select(`
+                id,
+                completed,
+                completion_date,
+                amount,
+                payment_type,
+                is_paid,
+                subtask_templates(id, name, recurring)
+              `)
+              .eq('task_instance_id', instanceId)
+              .range(0, 9999);
+            if (error) throw error;
+            return { instanceId, subtasks: data };
+          })
+        );
+
+        const subtasksByInstanceId = {};
+        const nextPaymentTypes = {};
+        const nextPaidStatus = {};
+
+        for (const { instanceId, subtasks } of subtaskResults) {
+          const formatted = subtasks.map(s => ({
             id: s.id,
             name: s.subtask_templates?.name || '',
             completed: s.completed,
             completionDate: s.completion_date,
             amount: s.amount || '',
-            recurring: s.subtask_templates?.recurring || true,
+            recurring: s.subtask_templates?.recurring ?? true,
             templateId: s.subtask_templates?.id,
             paymentType: s.payment_type || '',
-            isPaid: s.is_paid || false
+            isPaid: s.is_paid || false,
           }));
-          
-          // Sort subtasks alphabetically
-          const sortedSubtasks = sortSubtasksAlphabetically(formattedSubtasks);
-          
-          // Update payment types and paid status
-          sortedSubtasks.forEach(subtask => {
-            if (subtask.paymentType) {
-              setSubtaskPaymentTypes(prev => ({
-                ...prev,
-                [subtask.id]: subtask.paymentType
-              }));
-            }
-            
-            if (subtask.isPaid) {
-              setSubtaskPaidStatus(prev => ({
-                ...prev,
-                [subtask.id]: subtask.isPaid
-              }));
-            }
+          const sorted = sortByName(formatted);
+
+          sorted.forEach(st => {
+            if (st.paymentType) nextPaymentTypes[st.id] = st.paymentType;
+            if (st.isPaid) nextPaidStatus[st.id] = st.isPaid;
           });
-          
-          // Update the specific task with its subtasks
-          setCategories(prevCategories => {
-            const updatedCategories = [...prevCategories];
-            const categoryIndex = updatedCategories.findIndex(c => c.id === categoryId);
-            if (categoryIndex === -1) return prevCategories;
-            
-            const taskIndex = updatedCategories[categoryIndex].tasks.findIndex(
-              t => t.id === instance.id
-            );
-            if (taskIndex === -1) return prevCategories;
-            
-            updatedCategories[categoryIndex].tasks[taskIndex].subtasks = sortedSubtasks;
-            
-            return updatedCategories;
-          });
+
+          subtasksByInstanceId[instanceId] = sorted;
         }
-        
-        // Check if all tasks are complete
+
+        // Commit once, merging fetched data with the current category metadata.
+        let allTasksComplete = true;
         setCategories(prevCategories => {
-          const allTasksComplete = prevCategories.every(category => 
-            category.tasks.every(task => 
+          const nextCategories = prevCategories.map(category => {
+            const tasks = (tasksByCategoryId[category.id] || []).map(task => {
+              if (task.hasSubtasks) {
+                task.subtasks = subtasksByInstanceId[task.id] || [];
+              }
+              return task;
+            });
+            return { ...category, tasks: sortByName(tasks) };
+          });
+          allTasksComplete = nextCategories.every(category =>
+            category.tasks.every(task =>
               task.completed && (!task.hasSubtasks || task.subtasks?.every(subtask => subtask.completed))
             )
           );
-          
-          setDeadlineStatus({
-            deadlineDate,
-            isPastDeadline: today > deadlineDate,
-            isComplete: allTasksComplete
-          });
-          
-          return prevCategories;
+          return nextCategories;
+        });
+        setSubtaskPaymentTypes(prev => ({ ...prev, ...nextPaymentTypes }));
+        setSubtaskPaidStatus(prev => ({ ...prev, ...nextPaidStatus }));
+        setDeadlineStatus({
+          deadlineDate,
+          isPastDeadline: today > deadlineDate,
+          isComplete: allTasksComplete,
         });
         
       } catch (error) {
-        console.error("Error loading tasks:", error);
+        showError("Error loading tasks:", error);
       } finally {
         setLoading(false);
       }
     };
     
     loadTasksForMonth();
-  }, [currentMonthId, categories.length]); // Removed 'categories' from dependencies
+    // We intentionally depend only on currentMonthId and categories.length — the effect
+    // writes to `categories`, so including it would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMonthId, categories.length]);
   
   // Calculate 7th business day of the NEXT month (since we're closing books for the selected month)
   const calculateDeadlineDate = (monthName) => {
     const [month, year] = monthName.split(' ');
-    const monthIndex = ["January", "February", "March", "April", "May", "June", 
-                      "July", "August", "September", "October", "November", "December"]
-                      .indexOf(month);
+    const monthIndex = MONTH_NAMES.indexOf(month);
     
     // Calculate the NEXT month (since deadline is for closing the books of the selected month)
     let nextMonthIndex = (monthIndex + 1) % 12;
@@ -424,7 +373,8 @@ const Dashboard = () => {
       // Get all template tasks (both recurring and non-recurring for the initial month)
       const { data: taskTemplates, error: templatesError } = await supabase
         .from('task_templates')
-        .select('*');
+        .select('*')
+        .range(0, 9999);
         
       if (templatesError) throw templatesError;
       
@@ -447,7 +397,8 @@ const Dashboard = () => {
           const { data: subtaskTemplates, error: subtasksError } = await supabase
             .from('subtask_templates')
             .select('*')
-            .eq('task_template_id', template.id);
+            .eq('task_template_id', template.id)
+            .range(0, 9999);
             
           if (subtasksError) throw subtasksError;
           
@@ -492,19 +443,16 @@ const Dashboard = () => {
       
       // Calculate next month name
       const [month, year] = currentMonth.month_name.split(' ');
-      const monthIndex = ["January", "February", "March", "April", "May", "June", 
-                         "July", "August", "September", "October", "November", "December"]
-                         .indexOf(month);
-      
+      const monthIndex = MONTH_NAMES.indexOf(month);
+
       // Calculate next month
       let nextMonthIndex = (monthIndex + 1) % 12;
       let nextYear = parseInt(year);
       if (nextMonthIndex === 0) { // If we're moving from December to January
         nextYear++;
       }
-      
-      const nextMonthName = `${["January", "February", "March", "April", "May", "June", 
-                             "July", "August", "September", "October", "November", "December"][nextMonthIndex]} ${nextYear}`;
+
+      const nextMonthName = `${MONTH_NAMES[nextMonthIndex]} ${nextYear}`;
       
       // Check if next month already exists
       const { data: existingMonth, error: existingMonthError } = await supabase
@@ -553,7 +501,8 @@ const Dashboard = () => {
           )
         `)
         .eq('month_id', currentMonthId)
-        .eq('task_templates.recurring', true); // Only get tasks whose templates are marked as recurring
+        .eq('task_templates.recurring', true)
+        .range(0, 9999);
         
       if (currentTasksError) throw currentTasksError;
       
@@ -591,7 +540,8 @@ const Dashboard = () => {
               )
             `)
             .eq('task_instance_id', currentTask.id)
-            .eq('subtask_templates.recurring', true); // Only recurring subtasks
+            .eq('subtask_templates.recurring', true)
+            .range(0, 9999);
             
           if (currentSubtasksError) throw currentSubtasksError;
           
@@ -626,8 +576,7 @@ const Dashboard = () => {
       alert(`Successfully created ${nextMonthName} with ${currentMonthTasks.length} recurring tasks`);
       
     } catch (error) {
-      console.error("Error creating next month:", error);
-      alert("Error creating next month: " + error.message);
+      showError("Error creating next month:", error);
     }
   };
   
@@ -637,19 +586,16 @@ const Dashboard = () => {
     if (!currentMonth) return { exists: true }; // Default to disabled if no current month
     
     const [month, year] = currentMonth.name.split(' ');
-    const monthIndex = ["January", "February", "March", "April", "May", "June", 
-                       "July", "August", "September", "October", "November", "December"]
-                       .indexOf(month);
-    
+    const monthIndex = MONTH_NAMES.indexOf(month);
+
     // Calculate next month
     let nextMonthIndex = (monthIndex + 1) % 12;
     let nextYear = parseInt(year);
     if (nextMonthIndex === 0) { // If we're moving from December to January
       nextYear++;
     }
-    
-    const nextMonth = `${["January", "February", "March", "April", "May", "June", 
-                         "July", "August", "September", "October", "November", "December"][nextMonthIndex]} ${nextYear}`;
+
+    const nextMonth = `${MONTH_NAMES[nextMonthIndex]} ${nextYear}`;
     
     // Check if this month name already exists
     const exists = monthOptions.some(m => m.name === nextMonth);
@@ -699,13 +645,13 @@ const Dashboard = () => {
       };
       
       // Resort tasks alphabetically
-      newCategories[categoryIndex].tasks = sortTasksAlphabetically(newCategories[categoryIndex].tasks);
+      newCategories[categoryIndex].tasks = sortByName(newCategories[categoryIndex].tasks);
       
       setCategories(newCategories);
       setEditingTaskId(null);
       
     } catch (error) {
-      console.error("Error updating task name:", error);
+      showError("Error updating task name:", error);
     }
   };
 
@@ -787,7 +733,7 @@ const Dashboard = () => {
       setDeleteType({ show: false, taskId: null, categoryId: null, type: 'single' });
       
     } catch (error) {
-      console.error("Error deleting task:", error);
+      showError("Error deleting task:", error);
     }
   };
   
@@ -835,7 +781,7 @@ const Dashboard = () => {
       setCategories(newCategories);
       
     } catch (error) {
-      console.error("Error updating task status:", error);
+      showError("Error updating task status:", error);
     }
   };
 
@@ -856,7 +802,7 @@ const Dashboard = () => {
         [subtaskId]: paymentType
       }));
     } catch (error) {
-      console.error("Error updating payment type:", error);
+      showError("Error updating payment type:", error);
     }
   };
 
@@ -879,7 +825,7 @@ const Dashboard = () => {
         [subtaskId]: newPaidStatus
       }));
     } catch (error) {
-      console.error("Error updating paid status:", error);
+      showError("Error updating paid status:", error);
     }
   };
   
@@ -924,7 +870,7 @@ const Dashboard = () => {
       setCategories(newCategories);
       
     } catch (error) {
-      console.error("Error updating subtask status:", error);
+      showError("Error updating subtask status:", error);
     }
   };
   
@@ -997,7 +943,7 @@ const Dashboard = () => {
         category.id === categoryId 
           ? {
               ...category,
-              tasks: sortTasksAlphabetically([
+              tasks: sortByName([
                 ...category.tasks,
                 { 
                   id: instance[0].id,
@@ -1017,7 +963,7 @@ const Dashboard = () => {
       setAddTaskExpanded(prev => ({...prev, [categoryId]: false}));
       
     } catch (error) {
-      console.error("Error adding new task:", error);
+      showError("Error adding new task:", error);
     }
   };
   
@@ -1082,12 +1028,12 @@ const Dashboard = () => {
       
       // Sort subtasks alphabetically after adding a new one
       newCategories[categoryIndex].tasks[taskIndex].subtasks = 
-        sortSubtasksAlphabetically(newCategories[categoryIndex].tasks[taskIndex].subtasks);
+        sortByName(newCategories[categoryIndex].tasks[taskIndex].subtasks);
       
       setCategories(newCategories);
       
     } catch (error) {
-      console.error("Error adding subtask:", error);
+      showError("Error adding subtask:", error);
     }
   };
   
@@ -1140,7 +1086,7 @@ const Dashboard = () => {
       setCategories(newCategories);
       
     } catch (error) {
-      console.error("Error deleting subtask:", error);
+      showError("Error deleting subtask:", error);
     }
   };
   
@@ -1177,7 +1123,7 @@ const Dashboard = () => {
       setCategories(newCategories);
       
     } catch (error) {
-      console.error("Error updating recurring status:", error);
+      showError("Error updating recurring status:", error);
     }
   };
   
@@ -1212,7 +1158,7 @@ const Dashboard = () => {
       setCategories(newCategories);
       
     } catch (error) {
-      console.error("Error updating subtask amount:", error);
+      showError("Error updating subtask amount:", error);
     }
   };
   
@@ -1270,7 +1216,7 @@ const Dashboard = () => {
 
   // Check if task is the Vendor Statements task
   const isVendorStatementsTask = (taskName) => {
-    return taskName === 'Vendor Statements Received/Reconciled';
+    return taskName === VENDOR_STATEMENTS_TASK_NAME;
   };
   
   if (loading) {
@@ -1283,6 +1229,24 @@ const Dashboard = () => {
 
   return (
     <div className="flex flex-col w-full min-h-screen bg-blue-50 p-4">
+      {errorMessage && (
+        <div
+          role="alert"
+          className="flex items-start justify-between bg-red-50 border border-red-300 text-red-800 rounded-md px-4 py-3 mb-4 shadow"
+        >
+          <div className="flex items-start space-x-2">
+            <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+            <span className="text-sm">{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => setErrorMessage(null)}
+            aria-label="Dismiss error"
+            className="ml-4 text-red-700 hover:text-red-900"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Month-End Dashboard</h1>
         <div className="flex items-center space-x-4">
@@ -1472,9 +1436,10 @@ const Dashboard = () => {
                       <li key={task.id} className={`py-3 ${task.hasSubtasks ? 'bg-yellow-50 rounded' : ''}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3">
-                            <button 
+                            <button
                               onClick={() => toggleTaskStatus(category.id, task.id)}
                               className="focus:outline-none"
+                              aria-label={task.completed ? 'Mark task incomplete' : 'Mark task complete'}
                             >
                               {task.completed ? (
                                 <CheckCircle size={20} className="text-green-500" />
@@ -1505,10 +1470,11 @@ const Dashboard = () => {
                                     <span className={`${task.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
                                       {task.name}
                                     </span>
-                                    <button 
+                                    <button
                                       className="ml-2 text-gray-400 hover:text-blue-500 focus:outline-none"
                                       onClick={() => startEditingTask(task.id, task.name)}
                                       title="Edit task name"
+                                      aria-label="Edit task name"
                                     >
                                       <Edit size={14} />
                                     </button>
@@ -1526,6 +1492,7 @@ const Dashboard = () => {
                                   <button
                                     onClick={() => toggleSubtaskExpand(category.id, task.id)}
                                     className="ml-2 focus:outline-none"
+                                    aria-label={task.expanded ? 'Collapse subtasks' : 'Expand subtasks'}
                                   >
                                     {task.expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                                   </button>
@@ -1533,169 +1500,20 @@ const Dashboard = () => {
                               </div>
                               
                               {task.hasSubtasks && task.expanded && (
-                                <div className="pl-6 mt-2 space-y-2">
-                                  <div className="flex items-center mb-2">
-                                    <input
-                                      type="text"
-                                      placeholder="Add new vendor"
-                                      className="mr-2 px-2 py-1 border border-gray-300 rounded text-sm"
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && e.target.value.trim()) {
-                                          addSubtask(category.id, task.id, e.target.value.trim());
-                                          e.target.value = '';
-                                        }
-                                      }}
-                                    />
-                                    <button
-                                      className="px-2 py-1 bg-blue-500 text-white rounded text-sm"
-                                      onClick={(e) => {
-                                        const input = e.target.previousElementSibling;
-                                        if (input && input.value.trim()) {
-                                          addSubtask(category.id, task.id, input.value.trim());
-                                          input.value = '';
-                                        }
-                                      }}
-                                    >
-                                      Add
-                                    </button>
-                                  </div>
-                                  
-                                  <ul className="space-y-2">
-                                  {task.subtasks && task.subtasks.map(subtask => {
-                                    const isVendorSubtask = isVendorStatementsTask(task.name);
-                                    const isPaid = subtaskPaidStatus[subtask.id] || subtask.isPaid || false;
-                                    const paymentType = subtaskPaymentTypes[subtask.id] || subtask.paymentType || '';
-                                    
-                                    return (
-                                      <li key={subtask.id} className="flex items-center justify-between border-b border-gray-100 pb-2">
-                                        <div className="flex items-center space-x-2">
-                                          <button 
-                                            onClick={() => toggleSubtaskStatus(category.id, task.id, subtask.id)}
-                                            className="focus:outline-none"
-                                          >
-                                            {subtask.completed ? (
-                                              <CheckCircle size={16} className="text-green-500" />
-                                            ) : (
-                                              <Circle size={16} className="text-gray-400" />
-                                            )}
-                                          </button>
-                                          <div className="flex items-center">
-                                            <span className={`text-sm ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-600'}`}>
-                                              {subtask.name}
-                                            </span>
-                                            {subtask.recurring && (
-                                              <Repeat 
-                                                size={14} 
-                                                className="ml-2 text-blue-500" 
-                                                title="Recurring vendor"
-                                              />
-                                            )}
-                                            {isVendorSubtask && isPaid && (
-                                              <div className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded-md flex items-center">
-                                                <DollarSign size={12} className="mr-1" />
-                                                Paid
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                          <div className="flex items-center">
-                                            <span className="text-xs text-gray-500 mr-1">$</span>
-                                            <input
-                                              type="text"
-                                              placeholder="Amount"
-                                              className="w-24 px-1 py-0.5 text-xs border border-gray-300 rounded text-right"
-                                              value={subtask.amount || ""}
-                                              onChange={(e) => {
-                                                // Allow digits and a single decimal point
-                                                let inputValue = e.target.value;
-                                                
-                                                // First remove all commas
-                                                let rawValue = inputValue.replace(/,/g, '');
-                                                
-                                                // Validate that it's a valid decimal number format
-                                                // Only keep digits and at most one decimal point
-                                                const decimalCount = (rawValue.match(/\./g) || []).length;
-                                                if (decimalCount > 1) {
-                                                  // If more than one decimal, keep only the first one
-                                                  const parts = rawValue.split('.');
-                                                  rawValue = parts[0] + '.' + parts.slice(1).join('');
-                                                }
-                                                
-                                                // Remove any non-digit, non-decimal characters
-                                                rawValue = rawValue.replace(/[^\d.]/g, '');
-                                                
-                                                // Format the value nicely with commas for thousands
-                                                let formattedValue = '';
-                                                if (rawValue !== '') {
-                                                  // Parse as float to handle decimal properly
-                                                  const parsedValue = parseFloat(rawValue);
-                                                  if (!isNaN(parsedValue)) {
-                                                    // Check if the original input ends with a decimal point
-                                                    if (rawValue.endsWith('.')) {
-                                                      // Keep the decimal point when typing
-                                                      formattedValue = parsedValue.toLocaleString('en-US') + '.';
-                                                    } else if (rawValue.includes('.')) {
-                                                      // Get decimal places
-                                                      const decimalPlaces = rawValue.split('.')[1].length;
-                                                      // Format with fixed decimal places
-                                                      formattedValue = parsedValue.toLocaleString('en-US', {
-                                                        minimumFractionDigits: decimalPlaces,
-                                                        maximumFractionDigits: decimalPlaces
-                                                      });
-                                                    } else {
-                                                      // Integer value
-                                                      formattedValue = parsedValue.toLocaleString('en-US');
-                                                    }
-                                                  } else {
-                                                    formattedValue = '';
-                                                  }
-                                                }
-                                                
-                                                updateSubtaskAmount(category.id, task.id, subtask.id, formattedValue);
-                                              }}
-                                            />
-                                          </div>
-                                          
-                                          {/* Payment options for Vendor Statements subtasks - now on same line */}
-                                          {isVendorSubtask && (
-                                            <>
-                                              <select 
-                                                className="text-xs border border-gray-300 rounded py-0.5 px-1"
-                                                value={paymentType}
-                                                onChange={(e) => setSubtaskPaymentType(subtask.id, e.target.value)}
-                                              >
-                                                <option value="">Payment Type</option>
-                                                <option value={PAYMENT_TYPES.CREDIT_CARD}>Credit Card</option>
-                                                <option value={PAYMENT_TYPES.ACH}>ACH</option>
-                                                <option value={PAYMENT_TYPES.ONLINE_PORTAL}>Online Portal</option>
-                                              </select>
-                                              <button
-                                                className={`text-xs px-2 py-0.5 rounded ${isPaid 
-                                                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-                                                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
-                                                onClick={() => togglePaidStatus(subtask.id)}
-                                              >
-                                                {isPaid ? 'Paid' : 'Mark Paid'}
-                                              </button>
-                                            </>
-                                          )}
-                                          
-                                          <span className="text-xs text-gray-500">
-                                            {subtask.completed ? formatDate(subtask.completionDate) : "Open"}
-                                          </span>
-                                          <button
-                                            onClick={() => deleteSubtask(category.id, task.id, subtask.id)}
-                                            className="text-gray-400 hover:text-red-500 focus:outline-none"
-                                          >
-                                            <Trash2 size={12} />
-                                          </button>
-                                        </div>
-                                      </li>
-                                    );
-                                  })}
-                                  </ul>
-                                </div>
+                                <SubtaskSection
+                                  task={task}
+                                  categoryId={category.id}
+                                  isVendorSubtask={isVendorStatementsTask(task.name)}
+                                  subtaskPaymentTypes={subtaskPaymentTypes}
+                                  subtaskPaidStatus={subtaskPaidStatus}
+                                  formatDate={formatDate}
+                                  onAddSubtask={addSubtask}
+                                  onToggleSubtask={toggleSubtaskStatus}
+                                  onUpdateAmount={updateSubtaskAmount}
+                                  onSetPaymentType={setSubtaskPaymentType}
+                                  onTogglePaid={togglePaidStatus}
+                                  onDeleteSubtask={deleteSubtask}
+                                />
                               )}
                             </div>
                           </div>
@@ -1705,6 +1523,7 @@ const Dashboard = () => {
                               onClick={() => toggleRecurringStatus(category.id, task.id)}
                               className={`focus:outline-none ${task.recurring ? 'text-blue-500' : 'text-gray-400'}`}
                               title={task.recurring ? "Remove from recurring" : "Make recurring"}
+                              aria-label={task.recurring ? 'Remove from recurring' : 'Make recurring'}
                             >
                               <Repeat size={16} />
                             </button>
@@ -1712,9 +1531,10 @@ const Dashboard = () => {
                               <Clock size={14} className="mr-1" />
                               {task.completed ? formatDate(task.completionDate) : "Open"}
                             </span>
-                            <button 
+                            <button
                               onClick={() => showDeleteOptions(category.id, task.id)}
                               className="text-gray-400 hover:text-red-500 focus:outline-none"
+                              aria-label="Delete task"
                             >
                               <Trash2 size={16} />
                             </button>
